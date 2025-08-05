@@ -8,7 +8,7 @@ from aiohttp import web
 
 # === CONFIGURATION ===
 BOT_TOKEN = "8468578455:AAGJYZptIyD8RRq4S6gejzKOE51nYyck7No"
-DELETE_DELAY = 20  # in seconds
+DELETE_DELAY = 20
 auto_delete_enabled = True
 message_buffer = []
 
@@ -16,7 +16,7 @@ message_buffer = []
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 log = logging.getLogger()
 
-# === HANDLERS ===
+# === MESSAGE HANDLER ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global message_buffer, auto_delete_enabled
 
@@ -29,10 +29,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'message_id': message.message_id,
         'timestamp': time.time()
     }
-
     message_buffer.append(message_info)
     log.info(f"📩 Message {message.message_id} queued for deletion in {DELETE_DELAY} sec")
 
+# === DELETER ===
 async def delete_old_messages(bot):
     global message_buffer
     while True:
@@ -43,10 +43,9 @@ async def delete_old_messages(bot):
             try:
                 await bot.delete_message(chat_id=msg['chat_id'], message_id=msg['message_id'])
                 log.info(f"✅ Deleted message {msg['message_id']}")
-                message_buffer.remove(msg)
             except Exception as e:
                 log.warning(f"❌ Could not delete message {msg['message_id']}: {e}")
-                message_buffer.remove(msg)
+            message_buffer.remove(msg)
 
         await asyncio.sleep(5)
 
@@ -73,36 +72,42 @@ async def settime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("❗ Usage: /settime <seconds>")
 
-# === FAKE WEB SERVER (Render workaround) ===
-async def handle_ping(request):
+# === WEB SERVER ===
+async def handle_root(request):
     return web.Response(text="✅ Bot is alive!")
 
-async def run_fake_web_server():
+async def start_web_server():
     app = web.Application()
-    app.router.add_get("/", handle_ping)
+    app.router.add_get("/", handle_root)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
-    log.info(f"🌐 Fake web server running on port {os.environ.get('PORT')}")
+    log.info(f"🌐 Fake web server running on port {port}")
 
 # === MAIN ===
 async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CommandHandler("startdelete", startdelete))
-    app.add_handler(CommandHandler("stopdelete", stopdelete))
-    app.add_handler(CommandHandler("settime", settime))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    telegram_app.add_handler(CommandHandler("startdelete", startdelete))
+    telegram_app.add_handler(CommandHandler("stopdelete", stopdelete))
+    telegram_app.add_handler(CommandHandler("settime", settime))
 
-    log.info("🤖 Bot is running... (Bulk Deletion Mode)")
-    app.create_task(delete_old_messages(app.bot))
+    log.info("🤖 Bot is running...")
 
-    # Run both bot and fake server concurrently
-    await asyncio.gather(
-        app.run_polling(),
-        run_fake_web_server()
-    )
+    # Initialize and start the bot manually (to avoid asyncio.run conflict)
+    await telegram_app.initialize()
+    await telegram_app.start()
+    telegram_app.create_task(delete_old_messages(telegram_app.bot))
+    await telegram_app.updater.start_polling()
+
+    # Run bot and web server concurrently
+    await start_web_server()
+
+    # Keep running forever
+    await telegram_app.updater.wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
