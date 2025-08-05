@@ -1,26 +1,14 @@
 import asyncio
-import time
 import logging
+import time
+import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, CommandHandler, ContextTypes
-import threading
-import http.server
-import socketserver
-
-
-def fake_web_server():
-    PORT = 10000
-    Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Serving fake HTTP server at port {PORT}")
-        httpd.serve_forever()
-
-# Start the fake server in another thread
-threading.Thread(target=fake_web_server, daemon=True).start()
+from aiohttp import web
 
 # === CONFIGURATION ===
 BOT_TOKEN = "8468578455:AAGJYZptIyD8RRq4S6gejzKOE51nYyck7No"
-DELETE_DELAY = 20  # in seconds (default)
+DELETE_DELAY = 20  # in seconds
 auto_delete_enabled = True
 message_buffer = []
 
@@ -49,21 +37,18 @@ async def delete_old_messages(bot):
     global message_buffer
     while True:
         current_time = time.time()
-        to_delete = []
-
-        for msg in message_buffer:
-            if current_time - msg['timestamp'] >= DELETE_DELAY:
-                to_delete.append(msg)
+        to_delete = [msg for msg in message_buffer if current_time - msg['timestamp'] >= DELETE_DELAY]
 
         for msg in to_delete:
             try:
                 await bot.delete_message(chat_id=msg['chat_id'], message_id=msg['message_id'])
                 log.info(f"✅ Deleted message {msg['message_id']}")
+                message_buffer.remove(msg)
             except Exception as e:
                 log.warning(f"❌ Could not delete message {msg['message_id']}: {e}")
-            message_buffer.remove(msg)
+                message_buffer.remove(msg)
 
-        await asyncio.sleep(5)  # check every 5 seconds
+        await asyncio.sleep(5)
 
 # === COMMANDS ===
 async def startdelete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,14 +73,22 @@ async def settime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("❗ Usage: /settime <seconds>")
 
-# === STARTUP HOOK ===
-async def on_startup(app):
-    app.create_task(delete_old_messages(app.bot))
-    log.info("🚀 Background cleaner started")
+# === FAKE WEB SERVER (Render workaround) ===
+async def handle_ping(request):
+    return web.Response(text="✅ Bot is alive!")
+
+async def run_fake_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    await site.start()
+    log.info(f"🌐 Fake web server running on port {os.environ.get('PORT')}")
 
 # === MAIN ===
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+async def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler("startdelete", startdelete))
@@ -103,4 +96,13 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("settime", settime))
 
     log.info("🤖 Bot is running... (Bulk Deletion Mode)")
-    app.run_polling()
+    app.create_task(delete_old_messages(app.bot))
+
+    # Run both bot and fake server concurrently
+    await asyncio.gather(
+        app.run_polling(),
+        run_fake_web_server()
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
