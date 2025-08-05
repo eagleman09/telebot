@@ -100,7 +100,7 @@ pyparsing==3.2.1
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.0
-python-telegram-bot==20.8
+python-telegram-bot==20.7
 pytz==2025.1
 pyunormalize==16.0.0
 PyYAML==6.0.2
