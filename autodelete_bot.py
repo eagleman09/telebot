@@ -3,6 +3,20 @@ import time
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, CommandHandler, ContextTypes
+import threading
+import http.server
+import socketserver
+
+
+def fake_web_server():
+    PORT = 10000
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Serving fake HTTP server at port {PORT}")
+        httpd.serve_forever()
+
+# Start the fake server in another thread
+threading.Thread(target=fake_web_server, daemon=True).start()
 
 # === CONFIGURATION ===
 BOT_TOKEN = "8468578455:AAGJYZptIyD8RRq4S6gejzKOE51nYyck7No"
