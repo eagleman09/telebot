@@ -5,3 +5,5 @@ services:
     plan: free
     buildCommand: ""
     startCommand: python autodelete_bot.py
+    pythonVersion: 3.11.7
+    autoDeploy: true
